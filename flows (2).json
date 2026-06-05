@@ -1,0 +1,445 @@
+[
+    {
+        "id": "ba1a949bfec32e58",
+        "type": "mqtt in",
+        "z": "cace20c922ec54b8",
+        "name": "MQTT subs",
+        "topic": "monitoringmesincpi",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "5a6dd8a701a64ce7",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 130,
+        "y": 240,
+        "wires": [
+            [
+                "5bf1c6722719c54c"
+            ]
+        ]
+    },
+    {
+        "id": "5bf1c6722719c54c",
+        "type": "json",
+        "z": "cace20c922ec54b8",
+        "name": "",
+        "property": "payload",
+        "action": "obj",
+        "pretty": false,
+        "x": 350,
+        "y": 240,
+        "wires": [
+            [
+                "29273115370f128e",
+                "49003f20bcc34d5a"
+            ]
+        ]
+    },
+    {
+        "id": "29273115370f128e",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Json debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 530,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "f68a9265efe1539d",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "debug user_id",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 800,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "bb192d3faec0f95e",
+        "type": "function",
+        "z": "cace20c922ec54b8",
+        "name": "Counting Run, Lost, Down & Input Data",
+        "func": "let event = msg.data_sensor.event;\n\nif (msg.payload && msg.payload.length > 0) {\n    let user = msg.payload[0];\n    let sekarang = Date.now()\n    let operator = user.nama_operator;\n    let mesin_id = user.id_mesin;    \n    \n    switch (event) {\n        case 1:\n            // kode event 1\n            context.set(\"waktuMulairun\", sekarang);\n            msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,runtime_sec,last_event) VALUES (?,?,?,?)\";\n            msg.payload = [mesin_id, operator, 0, event];\n            msg.notifikasi = `Perhitungan Dimulai`;\n            //let output3 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n            let output4 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n            return [output4];\n            break;\n        case 2:\n            // kode event 2\n            let mulai1 = context.get(\"waktuMulairun\");\n            if (mulai1) {\n                let durasi = (sekarang - mulai1) / 1000;\n                msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,runtime_sec,last_event) VALUES (?,?,?,?)\";\n                msg.payload = [mesin_id,operator, durasi,event];\n                context.set(\"waktuMulai\", null);\n                msg.notifikasi = `Mesin Mati. Operator: ${operator}, Durasi: ${durasi.toFixed(2)}s`;\n                //let output1 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n                let output2 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n\n                return [output2];\n            } else {\n                msg.payload = \"Error : 1\";\n            }\n            break;\n        case 3:\n                let durasi1 = context.set(\"waktuMulailost\", sekarang);\n                msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,lost_time_sec,last_event) VALUES (?,?,?,?)\";\n                msg.payload = [mesin_id,operator, 0,event];\n                msg.notifikasi = `Perhitungan Dimulai`;\n                //let output5 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n                let output6 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n                return [output6];\n                break;\n        case 4:\n            // kode event 4\n            let mulai3 = context.get(\"waktuMulailost\");\n            if (mulai3) {\n                let durasi = (sekarang - mulai3) / 1000;\n                msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,lost_time_sec,last_event) VALUES (?,?,?,?)\";\n                msg.payload = [mesin_id,operator, durasi,event];\n                context.set(\"waktuMulai\", null);\n                msg.notifikasi = `Mesin Mati. Operator: ${operator}, Durasi: ${durasi.toFixed(2)}s`;\n                //let output1 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n                let output2 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n\n                return [output2];\n            } else {\n                msg.payload = \"Error : 1\";\n            }\n            break;\n        case 5:\n        // kode event 5\n                let durasi = context.set(\"waktuMulaidown\", sekarang);\n                msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,downtime_sec,last_event) VALUES (?,?,?,?)\";\n                msg.payload = [mesin_id,operator, 0,event];\n                msg.notifikasi = `Perhitungan Dimulai`;\n                //let output1 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n                let output2 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n\n                return [output2];\n                break;\n        case 6:\n            // kode event 6\n            let mulai = context.get(\"waktuMulaidown\");\n            if (mulai) {\n                let durasi = (sekarang - mulai) / 1000;\n                msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,downtime_sec,last_event) VALUES (?,?,?,?)\";\n                msg.payload = [mesin_id,operator, durasi,event];\n                context.set(\"waktuMulai\", null);\n                msg.notifikasi = `Mesin Mati. Operator: ${operator}, Durasi: ${durasi.toFixed(2)}s`;\n                //let output1 = { payload: pesanMqtt }; // Ke MQTT Out (Jalur Atas)\n                let output2 = msg.topic !== \"\" ? msg : null; // Ke MySQL Insert (Jalur Bawah)\n\n                return [output2];\n            } else {\n                msg.payload = \"Error : 1\";\n            }\n            break;\n        \n    }\n} else {\n    // Data tidak ditemukan\n    let output1 = {payload:{\n        status: \"gagal\",\n        message: \"User tidak ditemukan\"}};\n    return [null];\n    };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1100,
+        "y": 440,
+        "wires": [
+            [
+                "ce2a693addc1675d",
+                "1984498414b8a853"
+            ]
+        ]
+    },
+    {
+        "id": "2e383e4f7602d869",
+        "type": "mqtt out",
+        "z": "cace20c922ec54b8",
+        "name": "",
+        "topic": "monitoringmesincpi/1",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "2244c94e296251ac",
+        "x": 1320,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "49003f20bcc34d5a",
+        "type": "function",
+        "z": "cace20c922ec54b8",
+        "name": "Validasi User ID",
+        "func": "let users_id = msg.payload.user_id;\nlet event = msg.payload.event;\nlet production = msg.payload.production;\nlet machine_id = msg.payload.Id_mesin;\nmsg.data_sensor = {\n    user_id: users_id,\n    event: event,\n    production : production,\n    Id_mesin : machine_id\n};\nmsg.topic = \"SELECT * FROM opr WHERE user_id = ?\";\nmsg.payload = [users_id];\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 540,
+        "y": 440,
+        "wires": [
+            [
+                "f68a9265efe1539d",
+                "4368cc307b859926"
+            ]
+        ]
+    },
+    {
+        "id": "c32a3d2faf6bc25d",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Output Validasi",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1020,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "c83d6f73a93a5beb",
+        "type": "function",
+        "z": "cace20c922ec54b8",
+        "name": "Kirim Pesan MQTT",
+        "func": "if (msg.payload && msg.payload.length > 0){\n    let user = msg.payload[0];\n    let role = user.departemen;\n    let pesanMqtt = {\n    valid: \"true\", \n    role : role\n    };\n    let output = { payload: pesanMqtt };\n    return [output]\n} else {\n    // Data tidak ditemukan\n    let output1 = {\n        payload: {\n            valid: \"false\",\n            message: \"User tidak ditemukan\"\n        }\n    };\n    return [output1];\n};\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1030,
+        "y": 600,
+        "wires": [
+            [
+                "2e383e4f7602d869"
+            ]
+        ]
+    },
+    {
+        "id": "ce2a693addc1675d",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Debug Output Query",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1560,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "e6de63e60e720a8b",
+        "type": "function",
+        "z": "cace20c922ec54b8",
+        "name": "Counting Sosis",
+        "func": "let waktusekarang = Date.now()\nlet biarkan = msg.payload[0];\nlet event = msg.data_sensor.event;\nlet production = msg.data_sensor.production;\nlet mesin_id = msg.data_sensor.Id_mesin;\nlet operator = biarkan.nama_operator;\nif (event == 7){\n    msg.topic = \"INSERT INTO machine_logs (machine_id,operator_name,production_count) VALUES (?,?,?)\";\n    msg.payload = [mesin_id, operator, production];\n    return msg \n};",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1020,
+        "y": 360,
+        "wires": [
+            [
+                "b87077c8ecac99d6",
+                "8004206d042ad385"
+            ]
+        ]
+    },
+    {
+        "id": "b87077c8ecac99d6",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Debug Output Counting Sosis",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1350,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "8004206d042ad385",
+        "type": "delay",
+        "z": "cace20c922ec54b8",
+        "name": "",
+        "pauseType": "rate",
+        "timeout": "5",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "5",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": true,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 1300,
+        "y": 360,
+        "wires": [
+            [
+                "9895ca770eb08a30",
+                "8c848b4ee9305f2e"
+            ]
+        ]
+    },
+    {
+        "id": "9895ca770eb08a30",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Output Delay",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1530,
+        "y": 400,
+        "wires": []
+    },
+    {
+        "id": "180cc03cf3263231",
+        "type": "websocket out",
+        "z": "cace20c922ec54b8",
+        "name": "Kirim Data ke WebSocket",
+        "server": "2823c6292c02fa5d",
+        "client": "",
+        "x": 1250,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "52d606c15b2b28d0",
+        "type": "function",
+        "z": "cace20c922ec54b8",
+        "name": "Kirim ke WS",
+        "func": "let user = msg.payload[0];\nlet id_mesin = user.id_mesin;\nlet nama_operator = user.nama_operator;\nlet role = user.role;\nlet departemen = user.departemen;\nlet production = msg.data_sensor.production;\nlet event = msg.data_sensor.event;\n\nmsg.payload= {\n  ID_mesin: id_mesin,\n  operator: nama_operator,\n  role: role,\n  department: departemen,\n  production: production,\n  event: event\n}\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1010,
+        "y": 520,
+        "wires": [
+            [
+                "180cc03cf3263231",
+                "0cf08afc8dc403d4"
+            ]
+        ]
+    },
+    {
+        "id": "0cf08afc8dc403d4",
+        "type": "debug",
+        "z": "cace20c922ec54b8",
+        "name": "Debug WebSocket",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1230,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "4368cc307b859926",
+        "type": "mysql",
+        "z": "cace20c922ec54b8",
+        "mydb": "2c11d85d9c72e4e6",
+        "name": "",
+        "x": 810,
+        "y": 440,
+        "wires": [
+            [
+                "e6de63e60e720a8b",
+                "bb192d3faec0f95e",
+                "52d606c15b2b28d0",
+                "c83d6f73a93a5beb"
+            ]
+        ]
+    },
+    {
+        "id": "8c848b4ee9305f2e",
+        "type": "mysql",
+        "z": "cace20c922ec54b8",
+        "mydb": "2c11d85d9c72e4e6",
+        "name": "",
+        "x": 1530,
+        "y": 340,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1984498414b8a853",
+        "type": "mysql",
+        "z": "cace20c922ec54b8",
+        "mydb": "2c11d85d9c72e4e6",
+        "name": "",
+        "x": 1530,
+        "y": 500,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "5a6dd8a701a64ce7",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "10.68.1.220",
+        "port": "1884",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "2244c94e296251ac",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "10.68.1.220",
+        "port": "1884",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "2823c6292c02fa5d",
+        "type": "websocket-listener",
+        "path": "/ws/data",
+        "wholemsg": "false"
+    },
+    {
+        "id": "2c11d85d9c72e4e6",
+        "type": "MySQLdatabase",
+        "name": "",
+        "host": "10.68.1.170",
+        "port": "3306",
+        "db": "mesin_filling",
+        "tz": "",
+        "charset": "UTF8"
+    },
+    {
+        "id": "569b52f163e3ee83",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-node-mysql": "3.0.0"
+        }
+    }
+]

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Industrial IoT Dashboard</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.0/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&amp;family=Outfit:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet">
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#0d1117',
+            panel: '#161b22',
+            border: '#21262d',
+            accent: '#2f81f7',
+            amber: '#d29922',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    * { font-family: 'Outfit', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    .glow-blue { box-shadow: 0 0 20px rgba(47,129,247,0.15); }
+    .glow-amber { box-shadow: 0 0 20px rgba(210,153,34,0.15); }
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @keyframes bar-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+    .bar-animate { animation: bar-grow 0.8s ease-out forwards; transform-origin: bottom; }
+    
+    .sensor-trigger {
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .machine-card:hover .sensor-trigger {
+      opacity: 1;
+    }
+  </style>
+ </head>
+ <body class="h-full bg-surface text-gray-200 overflow-auto">
+  <div id="app" class="h-full w-full p-3 sm:p-4 md:p-6">
+   <header class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+    <div class="flex items-center gap-3">
+     <div class="w-9 h-9 rounded-lg bg-accent/20 flex items-center justify-center">
+      <i data-lucide="droplets" class="w-5 h-5 text-accent"></i>
+     </div>
+     <div>
+      <h1 id="title" class="text-xl font-semibold text-white">Filling Machine Fleet Monitor</h1>
+      <p class="text-xs text-gray-500 mono">8 MACHINES • LIVE MONITORING</p>
+     </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+     <div class="flex items-center gap-2 text-xs text-gray-400 whitespace-nowrap">
+      <span id="ws-status-dot" class="w-2 h-2 rounded-full bg-gray-500 pulse-dot inline-block"></span> <span id="ws-status-text">OFFLINE</span>
+     </div>
+     <div class="text-xs text-gray-500 mono whitespace-nowrap" id="clock">
+      --:--:--
+     </div>
+    </div>
+   </header>
+
+   <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div class="bg-panel border border-border rounded-xl p-4 glow-blue">
+     <div class="flex items-center gap-2 mb-3">
+      <i data-lucide="package" class="w-4 h-4 text-emerald-400"></i> <span class="text-xs text-gray-500 uppercase tracking-wider">Total Production</span>
+     </div>
+     <p id="totalProduction" class="text-2xl font-bold text-emerald-400 mono">0 pcs</p>
+     <p class="text-xs text-gray-500 mt-1">Sausages produced today</p>
+    </div>
+    <div class="bg-panel border border-border rounded-xl p-4">
+     <div class="flex items-center gap-2 mb-3">
+      <i data-lucide="zap" class="w-4 h-4 text-yellow-400"></i> <span class="text-xs text-gray-500 uppercase tracking-wider">Total Lost Time</span>
+     </div>
+     <p id="totalLostTime" class="text-2xl font-bold text-yellow-400 mono">0h 0m</p>
+     <p class="text-xs text-gray-500 mt-1">Planned stops</p>
+    </div>
+    <div class="bg-panel border border-border rounded-xl p-4 glow-amber">
+     <div class="flex items-center gap-2 mb-3">
+      <i data-lucide="alert-triangle" class="w-4 h-4 text-amber"></i> <span class="text-xs text-gray-500 uppercase tracking-wider">Total Downtime</span>
+     </div>
+     <p id="totalDowntime" class="text-2xl font-bold text-amber mono">0h 0m</p>
+     <p class="text-xs text-gray-500 mt-1">Unplanned stops</p>
+    </div>
+    <div class="bg-panel border border-border rounded-xl p-4">
+     <div class="flex items-center gap-2 mb-3">
+      <i data-lucide="activity" class="w-4 h-4 text-emerald-400"></i> <span class="text-xs text-gray-500 uppercase tracking-wider">Running</span>
+     </div>
+     <p class="text-2xl font-bold text-emerald-400 mono"><span id="runningCount">0</span> / 8</p>
+     <p class="text-xs text-gray-500 mt-1">Machines active</p>
+    </div>
+   </div>
+
+   <div id="machineGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+     </div>
+  </div>
+
+  <script>
+    let machines = [
+      { id: 'FIL-001', name: 'Filling 1', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-002', name: 'Filling 2', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-003', name: 'Filling 3', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-004', name: 'Filling 4', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-005', name: 'Filling 5', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-006', name: 'Filling 6', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false },
+      { id: 'FIL-007', name: 'Filling 7', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false},
+      { id: 'FIL-008', name: 'Filling 8', operator: 'Waiting...', role: '-', department: '-', status: 'stopped', production_val: 0, production: '0 pcs', runtime_sec: 0, lostTime_sec: 0, downtime_sec: 0, isLost: false, isDown: false,isRunning : false }
+    ];
+
+    const wsUrl = 'ws://10.68.1.141:1882/ws/data'; 
+
+    function formatTime(totalSeconds) {
+      const h = Math.floor(totalSeconds / 3600);
+      const m = Math.floor((totalSeconds % 3600) / 60);
+      const s = totalSeconds % 60;
+      return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+    }
+
+    window.triggerProximity = (machineId) => {
+      const idx = machines.findIndex(m => m.id === machineId);
+      if (idx !== -1 && machines[idx].status === 'running') {
+        machines[idx].production_val++;
+        machines[idx].production = `${machines[idx].production_val} pcs`;
+        renderMachines();
+      }
+    };
+
+    function renderMachines() {
+      const grid = document.getElementById('machineGrid');
+      if(!grid) return;
+      grid.innerHTML = '';
+      
+      let runningCount = 0;
+      let totalProd = 0;
+      let globalLost = 0;
+      let globalDown = 0;
+
+      machines.forEach((m) => {
+        if(m.status === 'running') runningCount++;
+        totalProd += m.production_val;
+        globalLost += m.lostTime_sec;
+        globalDown += m.downtime_sec;
+
+        let statusUI = { color: 'red', text: 'Stopped' };
+        if(m.status === 'running') statusUI = { color: 'emerald', text: 'Running' };
+        if(m.status === 'perbaikan') statusUI = { color: 'amber', text: 'Perbaikan' };
+
+        const card = document.createElement('div');
+        card.className = 'machine-card relative bg-panel border border-border rounded-xl p-4 flex flex-col overflow-hidden';
+        const machineColor = m.status === 'running' ? '#10b981' : (m.status === 'perbaikan' ? '#d29922' : '#ef4444');
+
+        card.innerHTML = `
+          <button onclick="triggerProximity('${m.id}')" class="sensor-trigger absolute top-2 right-2 z-10 bg-accent hover:bg-accent/80 text-white text-[10px] px-2 py-1 rounded-md mono shadow-lg">
+            TRIGGER SENSOR
+          </button>
+          <svg viewBox="0 0 100 80" class="w-full h-20 mb-3">
+            <rect x="15" y="50" width="70" height="15" rx="2" fill="#374151"/>
+            <ellipse cx="50" cy="35" rx="20" ry="25" fill="#4b5563"/>
+            <ellipse cx="50" cy="12" rx="20" ry="8" fill="#5a6370"/>
+            <rect x="65" y="28" width="4" height="12" rx="2" fill="#6b7280"/>
+            <circle cx="67" cy="42" r="2" fill="${machineColor}"/>
+            <rect x="31" y="28" width="4" height="12" rx="2" fill="#6b7280"/>
+            <circle cx="33" cy="42" r="2" fill="${machineColor}"/>
+          </svg>
+          <div class="flex items-start justify-between mb-2">
+            <div>
+              <h3 class="text-sm font-semibold text-white">${m.name}</h3>
+              <p class="text-xs text-gray-500 mono">${m.id}</p>
+            </div>
+            <span class="w-2 h-2 rounded-full bg-${statusUI.color}-400 pulse-dot inline-block"></span>
+          </div>
+          <div class="space-y-2 text-xs flex-1">
+            <div class="flex justify-between"><span class="text-gray-400">Operator:</span><span class="text-white font-medium">${m.operator}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400">Role:</span><span class="text-accent font-medium">${m.role}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400">Dept:</span><span class="text-gray-300 font-medium">${m.department}</span></div>
+            <div class="flex justify-between border-t border-border/50 pt-2"><span class="text-gray-400">Runtime:</span><span class="text-blue-400 font-medium">${formatTime(m.runtime_sec)}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400">Production:</span><span class="text-emerald-400 font-medium">${m.production}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400">Lost Time:</span><span class="text-yellow-400 font-medium">${formatTime(m.lostTime_sec)}</span></div>
+            <div class="flex justify-between"><span class="text-gray-400">Downtime:</span><span class="text-amber font-medium">${formatTime(m.downtime_sec)}</span></div>
+            <div class="pt-2 border-t border-border mt-2">
+              <span class="text-${statusUI.color}-400 font-medium">${statusUI.text}</span>
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+
+      document.getElementById('runningCount').innerText = runningCount;
+      document.getElementById('totalProduction').innerText = totalProd.toLocaleString() + " pcs";
+      document.getElementById('totalLostTime').innerText = Math.floor(globalLost/3600) + "h " + Math.floor((globalLost%3600)/60) + "m";
+      document.getElementById('totalDowntime').innerText = Math.floor(globalDown/3600) + "h " + Math.floor((globalDown%3600)/60) + "m";
+      lucide.createIcons();
+    }
+
+    setInterval(() => {
+      machines.forEach(m => {
+        if (m.isRunning) m.runtime_sec++;
+        if (m.isLost) m.lostTime_sec++;
+        if (m.isDown) m.downtime_sec++;
+      });
+      renderMachines();
+    }, 1000);
+
+    function initWebSocket(url) {
+      const socket = new WebSocket(url);
+      const statusDot = document.getElementById('ws-status-dot');
+      const statusText = document.getElementById('ws-status-text');
+      socket.onopen = () => {
+        statusDot.className = "w-2 h-2 rounded-full bg-emerald-400 pulse-dot inline-block";
+        statusText.innerText = "LIVE";
+      };
+      socket.onmessage = (event) => {
+        try {
+          const newData = JSON.parse(event.data);
+          const idx = machines.findIndex(m => m.id.includes(newData.ID_mesin.toString().padStart(3, '0')));
+          if (idx !== -1) {
+            let m = machines[idx];
+            if(newData.operator) m.operator = newData.operator;
+            if(newData.role) m.role = newData.role;
+            if(newData.department) m.department = newData.department;
+            if(newData.production !== undefined) {
+              m.production = newData.production;
+              const valMatch = newData.production.toString().replace(/,/g, '').match(/\d+/);
+              if(valMatch) m.production_val = parseInt(valMatch[0]);
+            }
+            if(newData.event !== undefined) {
+              const ev = parseInt(newData.event);
+              switch(ev) {
+                case 1: m.isRunning = true; m.status = (m.isLost || m.isDown) ? 'perbaikan' : 'running'; break;
+                case 2: m.isRunning = false; m.status = (m.isLost || m.isDown) ? 'perbaikan' : 'stopped'; break;
+                case 3: m.isLost = true; m.status = 'perbaikan'; break;
+                case 4: m.isLost = false; m.status = m.isDown ? 'perbaikan' : (m.isRunning ? 'running' : 'stopped'); break;
+                case 5: m.isDown = true; m.status = 'perbaikan'; break;
+                case 6: m.isDown = false; m.status = m.isLost ? 'perbaikan' : (m.isRunning ? 'running' : 'stopped'); break;
+              }
+            }
+            renderMachines();
+          }
+        } catch (err) { console.error("JSON Error:", err); }
+      };
+      socket.onclose = () => {
+        statusDot.className = "w-2 h-2 rounded-full bg-red-500 inline-block";
+        statusText.innerText = "OFFLINE";
+        setTimeout(() => initWebSocket(url), 5000);
+      };
+    }
+
+    function updateClock() {
+      document.getElementById('clock').textContent = new Date().toTimeString().slice(0,8);
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+    renderMachines();
+    initWebSocket(wsUrl);
+  </script>
+ </body>
+</html>
