@@ -113,6 +113,7 @@ String serverRole = "";
 const unsigned long VALIDATION_TIMEOUT = 10000;
 unsigned long validationStartTime = 0;
 String lastUserId = "";
+String idOrangLama = "";
 
 // ============================================================
 // KEYPAD 4x4
@@ -152,7 +153,8 @@ enum State {
   ST_HALT,
   ST_TRIPLE_AUTH,
   ST_STOP_AUTH,
-  ST_PREVENTIVE_MT
+  ST_PREVENTIVE_MT,
+  ST_GANTI_PEMAIN
 };
 
 State currentState = ST_IDLE;
@@ -327,7 +329,12 @@ void restoreLCD(State s) {
     lcd.print("MESIN SIAP");
     lcd.setCursor(0, 1);
     lcd.print("TEKAN START...");
-  }
+  } else if (s == ST_GANTI_PEMAIN) {
+    lcd.setCursor(0, 0);
+    lcd.print("GANTI ORANG (LT)");
+    lcd.setCursor(0, 1);
+    lcd.print("ID: ");
+    }
 }
 
 // ============================================================
@@ -430,7 +437,7 @@ void gantiState(State s) {
   } else if (s == ST_HALT) {
     digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, LOW);
-    totalDownTime = 0;
+    // totalDownTime = 0;
     stopDownTime = false;
     lcd.setCursor(0, 0);
     lcd.print("DOWN TIME!");
@@ -448,6 +455,11 @@ void gantiState(State s) {
     lcd.print("STOP? PIN:");
     lcd.setCursor(0, 1);
     lcd.print("A:ENT C:CANCEL");
+  }else if (s == ST_GANTI_PEMAIN) { // [TAMBAHKAN BLOK INI]
+    lcd.setCursor(0, 0);
+    lcd.print("GANTI ORANG (LT)");
+    lcd.setCursor(0, 1);
+    lcd.print("ID: ");
   }
 }
 
@@ -521,6 +533,21 @@ void loop() {
 
   char key = keypad.getKey();
   unsigned long skrg = millis();
+  static unsigned long lastTimerUpdate = 0;
+  if (skrg - lastTimerUpdate >= 1000) {
+    lastTimerUpdate = skrg;
+
+    // Tambah total lost time (berjalan di menu LT, saat ganti pemain, & saat nunggu server)
+    if (currentState == ST_REPAIRING || currentState == ST_GANTI_PEMAIN || 
+       (currentState == ST_WAITING_SERVER && waitingCallerState == ST_GANTI_PEMAIN)) {
+      totalLostTime++;
+    }
+    // Tambah total down time (berjalan di menu DT, saat triple auth, & saat nunggu server)
+    else if (currentState == ST_HALT || currentState == ST_TRIPLE_AUTH || 
+            (currentState == ST_WAITING_SERVER && waitingCallerState == ST_TRIPLE_AUTH)) {
+      totalDownTime++;
+    }
+  }
   // {
   //   if (currentState != ST_READY && currentState != ST_DUAL_AUTH &&  currentState != ST_WAITING_SERVER && currentState != ST_RUNNING_PRODUCTION && currentState != ST_PERIODIC_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH){
   //     if (key == 'C'){
@@ -621,7 +648,7 @@ void loop() {
   //
   if (currentState == ST_REPAIRING) {
     lcd.setCursor(0, 1);
-    lcd.print("LT! 1:FIX 0:DWN ");
+    lcd.print("1:FIX 0:DWN D:ID");
     lcd.setCursor(0, 0);
     lcd.print("SEGERA PERBAIKI!");
   } else if (!stopDownTime && (currentState == ST_HALT || currentState == ST_TRIPLE_AUTH)) {
@@ -848,7 +875,23 @@ switch (currentState) {
           }
           break;
         }
+        // Dari ST_GANTI_USER_REPAIR
+        if (waitingCallerState == ST_GANTI_PEMAIN) {
+          // Jika ingin dibatasi hanya mekanik/operator tertentu, bisa tambahkan if(serverRole == "eng" || ...)
+          showFeedback("GANTI ID SUKSES!", 800);
 
+          // 1. Matikan event lost time orang lama
+          kirimEventkhusus(EVENT_STOP_LOST, idOrangLama);
+          delay(300);
+
+          // 2. Nyalakan event lost time untuk orang baru (lastUserId sudah update)
+          kirimEventkhusus(EVENT_START_LOST, lastUserId);
+
+          // 3. Kembali ke layar Repairing (Lost Time)
+          gantiState(ST_REPAIRING);
+          break;
+        }
+        // -------------------------------------------
         // Dari ST_STOP_AUTH
         if (waitingCallerState == ST_STOP_AUTH) {
           if (serverRole == "foreman") {
@@ -954,6 +997,12 @@ switch (currentState) {
         } else {
           showFeedback("ID TIDAK VALID!", 900);
         }
+        // --- TAMBAHAN PENTING ---
+        // Jika gagal saat ganti orang, pulihkan ID lama yang sedang berjalan
+        if (waitingCallerState == ST_GANTI_PEMAIN) {
+          lastUserId = idOrangLama;
+        }
+        // ------------------------
         currentState = stateAfterInvalid;
         restoreLCD(stateAfterInvalid);
       }
@@ -1039,6 +1088,8 @@ switch (currentState) {
       kirimEventkhusus(EVENT_START_DOWN, lastUserId);
       butuhTripleAuth = true;
       gantiState(ST_HALT);
+    }else if (key == 'D') {
+      gantiState(ST_GANTI_PEMAIN);
     }
     break;
 
@@ -1052,7 +1103,33 @@ switch (currentState) {
       gantiState(ST_TRIPLE_AUTH);
     }
     break;
-
+  // --------------------------------------------------------
+  // ST_GANTI_USER_REPAIR — Input keypad untuk ID mekanik/operator baru
+  // A: Submit, B: Backspace, C: Cancel (kembali ke LT)
+  // --------------------------------------------------------
+  case ST_GANTI_PEMAIN:
+    if (key) {
+      if (key == 'B') {
+        handleBackspace(4, 1);
+      } else if (key >= '0' && key <= '9' && auth_input.length() < 8) {
+        auth_input += key;
+        lcd.setCursor(4, 1);
+        lcd.print(auth_input);
+      } else if (key == 'A') {
+        if (auth_input.length() > 0) {
+          // [PENTING] Simpan ID lama sebelum ditimpa oleh mulaiValidasiServer
+          idOrangLama = lastUserId; 
+          
+          mulaiValidasiServer(auth_input, ST_GANTI_PEMAIN, ST_GANTI_PEMAIN);
+        }
+        auth_input = "";
+      } else if (key == 'C') {
+        // Batal ganti orang, kembali ke menu Lost Time
+        gantiState(ST_REPAIRING); 
+      }
+    }
+    break;
+  
   // --------------------------------------------------------
   // ST_TRIPLE_AUTH — input bebas, validasi ke server
   // --------------------------------------------------------
