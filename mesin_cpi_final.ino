@@ -88,6 +88,16 @@ unsigned long timerInterval = 0;
 const unsigned long jedaLooping = 10000;
 const unsigned long waktuDualAuth = 60000;
 
+// [REVISI 3] Simpan timerInterval saat ditekan stop,
+// supaya saat cancel/timeout, timer ST_RUNNING_PRODUCTION & ST_PERIODIC_AUTH
+// bisa dilanjutkan dari posisi sebelumnya (tidak restart dari awal).
+unsigned long savedTimerInterval = 0;      // menyimpan timerInterval saat masuk STOP_AUTH
+bool savedTimerActive = false;             // apakah state sebelum stop butuh restore timer (RUNNING / PERIODIC)
+
+// [REVISI 1] Timer untuk ST_STOP_AUTH (30 detik timeout)
+const unsigned long waktuStopAuth = 30000;
+unsigned long stopAuthStartTime = 0;       // waktu mulai masuk ST_STOP_AUTH
+
 // ============================================================
 // DEBOUNCE
 // ============================================================
@@ -304,10 +314,6 @@ void restoreLCD(State s) {
   } else if (s == ST_DUAL_AUTH) {
     lcd.setCursor(0, 0);
     lcd.print("AUTH SAC&OPR    ");
-    // lcd.setCursor(13, 0);
-    // lcd.print(sacOk ? "S" : ".");
-    // lcd.print(oprOk ? "O" : ".");
-    // lcd.print(" ");
     lcd.setCursor(0, 1);
     lcd.print("ID: ");
   } else if (s == ST_PERIODIC_AUTH) {
@@ -329,6 +335,11 @@ void restoreLCD(State s) {
     lcd.print("MESIN SIAP");
     lcd.setCursor(0, 1);
     lcd.print("TEKAN START...");
+  } else if (s == ST_RUNNING_PRODUCTION) {
+    lcd.setCursor(0, 0);
+    lcd.print("MESIN ON ");
+    lcd.setCursor(0, 1);
+    lcd.print("NEXT: ");
   } else if (s == ST_GANTI_PEMAIN) {
     lcd.setCursor(0, 0);
     lcd.print("GANTI ORANG (LT)");
@@ -390,6 +401,9 @@ void gantiState(State s) {
     stopDownTime = false;
     serverReply = VAL_PENDING;
     serverRole = "";
+    // [REVISI 3] Reset flag saved timer saat kembali ke IDLE
+    savedTimerActive = false;
+    savedTimerInterval = 0;
     lcd.setCursor(0, 0);
     lcd.print("SISTEM STANDBY");
     lcd.setCursor(0, 1);
@@ -401,6 +415,9 @@ void gantiState(State s) {
     digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, LOW);
     sacOk = oprOk = false;
+    // [REVISI 3] Reset flag saved timer saat kembali ke READY
+    savedTimerActive = false;
+    savedTimerInterval = 0;
     lcd.setCursor(0, 0);
     lcd.print("MESIN SIAP");
     lcd.setCursor(0, 1);
@@ -416,6 +433,9 @@ void gantiState(State s) {
   } else if (s == ST_RUNNING_PRODUCTION) {
     digitalWrite(pinRelayPLC, LOW);
     digitalWrite(pinAlarm, LOW);
+    // [REVISI 3] Reset flag saved timer saat kembali ke RUNNING
+    savedTimerActive = false;
+    savedTimerInterval = 0;
     lcd.setCursor(0, 0);
     lcd.print("MESIN ON ");
     lcd.setCursor(0, 1);
@@ -429,7 +449,9 @@ void gantiState(State s) {
   } else if (s == ST_REPAIRING) {
     digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, LOW);
-    // totalLostTime = 0;
+    // [REVISI 3] Reset flag saved timer
+    savedTimerActive = false;
+    savedTimerInterval = 0;
     lcd.setCursor(0, 0);
     lcd.print("LOST TIME!");
     lcd.setCursor(0, 1);
@@ -437,7 +459,6 @@ void gantiState(State s) {
   } else if (s == ST_HALT) {
     digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, LOW);
-    // totalDownTime = 0;
     stopDownTime = false;
     lcd.setCursor(0, 0);
     lcd.print("DOWN TIME!");
@@ -451,11 +472,13 @@ void gantiState(State s) {
     lcd.print("TRIPLE AUTH:");
     updateStatusTriple();
   } else if (s == ST_STOP_AUTH) {
+    // [REVISI 1] Catat waktu mulai STOP_AUTH untuk timeout 30 detik
+    stopAuthStartTime = millis();
     lcd.setCursor(0, 0);
-    lcd.print("STOP? PIN:");
+    lcd.print("STOP? PIN:      ");
     lcd.setCursor(0, 1);
-    lcd.print("A:ENT C:CANCEL");
-  }else if (s == ST_GANTI_PEMAIN) { // [TAMBAHKAN BLOK INI]
+    lcd.print("A:ENT C:CANCEL  ");
+  } else if (s == ST_GANTI_PEMAIN) {
     lcd.setCursor(0, 0);
     lcd.print("GANTI ORANG (LT)");
     lcd.setCursor(0, 1);
@@ -468,8 +491,6 @@ void gantiState(State s) {
 // ============================================================
 void setup() {
   Serial.begin(115200);
-  // WiFiManager wm;
-  // wm.resetSettings();
   pinMode(pinRelayPLC, OUTPUT);
   pinMode(pinAlarm, OUTPUT);
   pinMode(pinBtnForemanStop, INPUT_PULLUP);
@@ -477,7 +498,6 @@ void setup() {
   pinMode(pinBtnStart, INPUT_PULLUP);
   pinMode(pinSensorBenda, INPUT_PULLUP);
   pinMode(pinLampiCounter, OUTPUT);
-  // pinMode(pinDown, INPUT_PULLUP);
 
   digitalWrite(pinRelayPLC, HIGH);
   digitalWrite(pinAlarm, LOW);
@@ -491,12 +511,7 @@ void setup() {
   // Koneksi WiFi
   lcd.setCursor(0, 0);
   lcd.print("WiFi Manager... ");
-  // WiFi.begin(ssid, wifiPass);
   bool res = wm.autoConnect("ESP32_Config", "rahasia123");
-  //int wifiTry = 0;
-  //while (WiFi.status() != WL_CONNECTED && wifiTry < 20) {
-  //  delay(500); wifiTry++;
-  //}
   if (!res) {
     Serial.println("Gagal konek ke WiFi dan kehabisan waktu (timeout).");
     lcd.setCursor(0, 1);
@@ -548,30 +563,21 @@ void loop() {
       totalDownTime++;
     }
   }
-  // {
-  //   if (currentState != ST_READY && currentState != ST_DUAL_AUTH &&  currentState != ST_WAITING_SERVER && currentState != ST_RUNNING_PRODUCTION && currentState != ST_PERIODIC_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH){
-  //     if (key == 'C'){
-  //       gantiState(ST_PREVENTIVE_MT);
-  //     }
-  //   }
-  // }
-{
-    // bool btndwnNow = digitalRead(pinDown);
-    // if (btndwnNow != btndwnLastState) btndwnDebounce = skrg;
-    // if ((skrg - btnEmergencyDebounce) > debounceDelay) {
-      if (key == 'C') {
-        if (currentState != ST_PREVENTIVE_MT && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
-          gantiState(ST_HALT);
-          kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
-          delay(300);
-          kirimEventkhusus(EVENT_START_DOWN, lastUserId);
-          // btndwnLastState = btndwnNow;
-          return;
-        }
+
+  // ----------------------------------------------------------
+  // TOMBOL 'C' → masuk DOWN TIME (kecuali state-state tertentu)
+  // ----------------------------------------------------------
+  {
+    if (key == 'C') {
+      if (currentState != ST_PREVENTIVE_MT && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
+        gantiState(ST_HALT);
+        kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
+        delay(300);
+        kirimEventkhusus(EVENT_START_DOWN, lastUserId);
+        return;
       }
     }
-    // btndwnLastState = btndwnNow;
-  
+  }
 
   // ----------------------------------------------------------
   // TOMBOL EMERGENCY — debounce
@@ -594,10 +600,23 @@ void loop() {
 
   // ----------------------------------------------------------
   // TOMBOL FOREMAN STOP
+  // [REVISI 2 & 3] Saat masuk ST_STOP_AUTH dari ST_PERIODIC_AUTH,
+  // simpan timerInterval supaya timer bisa dilanjutkan saat cancel.
   // ----------------------------------------------------------
   if (digitalRead(pinBtnForemanStop) == LOW) {
     if (currentState != ST_IDLE && currentState != ST_STOP_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_WAITING_SERVER) {
       stateSebelumStop = currentState;
+
+      // [REVISI 3] Jika state sebelum stop adalah RUNNING_PRODUCTION atau PERIODIC_AUTH,
+      // simpan timerInterval-nya agar bisa dilanjutkan saat cancel/timeout.
+      if (currentState == ST_RUNNING_PRODUCTION || currentState == ST_PERIODIC_AUTH) {
+        savedTimerInterval = timerInterval;
+        savedTimerActive = true;
+      } else {
+        savedTimerActive = false;
+        savedTimerInterval = 0;
+      }
+
       gantiState(ST_STOP_AUTH);
       return;
     }
@@ -611,12 +630,12 @@ void loop() {
     if (btnStartNow != btnStartLastState) btnStartDebounce = skrg;
     if ((skrg - btnStartDebounce) > debounceDelay) {
       if (btnStartNow == LOW){
-        if (currentState == ST_READY){  // [FIX 1] event start saat tombol START ditekan
-        Serial.println("[BTN START] Tombol START ditekan → EVENT_START_RUN dikirim");
-        gantiState(ST_DUAL_AUTH);
-        btnStartLastState = btnStartNow;
-        return;
-        }else if (currentState == ST_IDLE || currentState == ST_FOREMAN_LOGIN){
+        if (currentState == ST_READY){
+          Serial.println("[BTN START] Tombol START ditekan → EVENT_START_RUN dikirim");
+          gantiState(ST_DUAL_AUTH);
+          btnStartLastState = btnStartNow;
+          return;
+        } else if (currentState == ST_IDLE || currentState == ST_FOREMAN_LOGIN){
           Serial.println("Masuk Mode Preventive Maintenance");
           gantiState(ST_PREVENTIVE_MT);
           btnStartLastState = btnStartNow;
@@ -645,7 +664,6 @@ void loop() {
   // ----------------------------------------------------------
   // DISPLAY LCD
   // ----------------------------------------------------------
-  //
   if (currentState == ST_REPAIRING) {
     lcd.setCursor(0, 1);
     lcd.print("1:FIX 0:DWN D:ID");
@@ -666,35 +684,29 @@ switch (currentState) {
 
   case ST_PREVENTIVE_MT:
     {
-      // Hitung sisa waktu dari 60 detik
       long sisa = 60L - (long)((skrg - timerInterval) / 1000);
       
-      // Tampilkan timer di layar
       lcd.setCursor(0, 1);
       if (sisa >= 0) {
         lcd.print("Waktu: ");
-        if (sisa < 10) lcd.print(" "); // Biar angka ga nge-bug
+        if (sisa < 10) lcd.print(" ");
         lcd.print(String(sisa) + "s");
       }
 
-      // Kondisi 1: Waktu habis otomatis
       if (sisa <= 0) {
         showFeedback("MT SELESAI!     ", 1000);
-        gantiState(ST_IDLE); // Otomatis balik ke IDLE, mesin mati (karena IDLE relay HIGH)
+        gantiState(ST_IDLE);
         break;
       }
 
-      // Kondisi 2: Dibatalkan secara manual sebelum waktu habis
-      // Misalnya dengan menekan tombol 'C' di keypad
       if (key == 'D') {
         showFeedback("MT SELESAI!     ", 1000);
-        gantiState(ST_IDLE); // Langsung balik ke IDLE dan matikan mesin
+        gantiState(ST_IDLE);
       }
     }
     break;
 
   // --------------------------------------------------------
-    // --------------------------------------------------------
   case ST_IDLE:
     if (key) {
       if (key == '*') {
@@ -705,22 +717,19 @@ switch (currentState) {
         lcd.print("Konek AP ESP32  ");
         
         Serial.println("Membuka portal WiFi on-demand...");
-        WiFi.disconnect(); // Putuskan koneksi saat ini
+        WiFi.disconnect();
         delay(200);
         
-        WiFi.mode(WIFI_AP_STA); // Aktifkan mode pancar hotspot + penerima
-        wm.setConfigPortalTimeout(120); // Batasi waktu portal 2 menit
+        WiFi.mode(WIFI_AP_STA);
+        wm.setConfigPortalTimeout(120);
         
-        // Membuka portal dengan nama "Mesin Filling 1" dan password "berbek124"
         if (!wm.startConfigPortal("Mesin Filling 1", "berbek124")) {
-          // --- KONDISI GAGAL ATAU TIMEOUT ---
           showFeedback("GAGAL/TIMEOUT!  ", 1500);
           Serial.println("Batal setting, menyambung ulang ke WiFi lama...");
           
-          WiFi.mode(WIFI_STA); // Matikan pancaran hotspot (AP)
-          WiFi.begin();        // Panggil kredensial lama di memori tanpa parameter
+          WiFi.mode(WIFI_STA);
+          WiFi.begin();
           
-          // Tunggu koneksi ulang maksimal 5 detik
           int waitTimeout = 0;
           lcd.setCursor(0, 1);
           lcd.print("RECONNECTING... ");
@@ -731,32 +740,30 @@ switch (currentState) {
           
           if (WiFi.status() == WL_CONNECTED) {
             showFeedback("TERHUBUNG LAGI! ", 1000);
-            reconnectMQTT(); // Pastikan MQTT tersambung lagi
+            reconnectMQTT();
           } else {
             showFeedback("WIFI OFFLINE!   ", 1500);
           }
           
-          gantiState(ST_IDLE); // Kembalikan layar ke mode standby
+          gantiState(ST_IDLE);
           
         } else {
-          // --- KONDISI BERHASIL SIMPAN WIFI BARU ---
           showFeedback("WIFI TERSIMPAN! ", 1500);
           Serial.println("WiFi baru tersimpan, menyesuaikan koneksi...");
           
-          WiFi.mode(WIFI_STA); // Matikan pancaran hotspot (AP)
+          WiFi.mode(WIFI_STA);
           
-          // Putuskan MQTT lama, lalu sambungkan dengan jaringan (IP) yang baru
           mqttClient.disconnect(); 
           reconnectMQTT();
           
-          gantiState(ST_IDLE); // Kembalikan layar ke mode standby
+          gantiState(ST_IDLE);
         }
       } else {
-        // Jika tombol yang ditekan BUKAN bintang
         gantiState(ST_FOREMAN_LOGIN);
       }
     }
     break;
+
   // --------------------------------------------------------
   // ST_FOREMAN_LOGIN — input bebas, validasi ke server
   // --------------------------------------------------------
@@ -778,14 +785,14 @@ switch (currentState) {
     break;
 
   // --------------------------------------------------------
-  // ST_READY — tunggu tombol START (ditangani di atas switch)
+  // ST_READY
   // --------------------------------------------------------
   case ST_READY:
     break;
 
   // --------------------------------------------------------
   // ST_DUAL_AUTH — input bebas, validasi ke server
-  // Countdown 60 detik, timeout → ST_READY
+  // Countdown 60 detik, timeout → ST_REPAIRING
   // --------------------------------------------------------
   case ST_DUAL_AUTH:
     {
@@ -802,8 +809,6 @@ switch (currentState) {
           kirimEventkhusus(EVENT_START_LOST, lastUserId);
           break;
         }
-        // [POIN 2] Dual auth timeout → mesin tidak jadi nyala → kirim EVENT_STOP_RUN
-      
       }
     }
     if (key) {
@@ -830,7 +835,6 @@ switch (currentState) {
         }
       }
     }
-    // Keduanya sudah valid → nyalakan mesin
     if (sacOk && oprOk) {
       gantiState(ST_RUNNING_PRODUCTION);
     }
@@ -875,28 +879,23 @@ switch (currentState) {
           }
           break;
         }
-        // Dari ST_GANTI_USER_REPAIR
+        // Dari ST_GANTI_PEMAIN
         if (waitingCallerState == ST_GANTI_PEMAIN) {
-          // Jika ingin dibatasi hanya mekanik/operator tertentu, bisa tambahkan if(serverRole == "eng" || ...)
           showFeedback("GANTI ID SUKSES!", 800);
-
-          // 1. Matikan event lost time orang lama
           kirimEventkhusus(EVENT_STOP_LOST, idOrangLama);
           delay(300);
-
-          // 2. Nyalakan event lost time untuk orang baru (lastUserId sudah update)
           kirimEventkhusus(EVENT_START_LOST, lastUserId);
-
-          // 3. Kembali ke layar Repairing (Lost Time)
           gantiState(ST_REPAIRING);
           break;
         }
-        // -------------------------------------------
         // Dari ST_STOP_AUTH
         if (waitingCallerState == ST_STOP_AUTH) {
           if (serverRole == "foreman") {
             showFeedback("KODE BENAR!", 800);
             kirimEventkhusus(EVENT_STOP_RUN, lastUserId);
+            // [REVISI 3] Reset flag saved timer saat berhasil stop
+            savedTimerActive = false;
+            savedTimerInterval = 0;
             gantiState(ST_IDLE);
           } else {
             showFeedback("BUKAN FOREMAN!", 900);
@@ -973,7 +972,7 @@ switch (currentState) {
           if (sacOk && engOk && oprOk) {
             kirimEventkhusus(EVENT_STOP_DOWN, lastUserId);
             butuhTripleAuth = false;
-            gantiState(ST_RUNNING_PRODUCTION);  // running dulu, baru periodic
+            gantiState(ST_RUNNING_PRODUCTION);
           } else {
             currentState = ST_TRIPLE_AUTH;
             lcd.clear();
@@ -997,12 +996,9 @@ switch (currentState) {
         } else {
           showFeedback("ID TIDAK VALID!", 900);
         }
-        // --- TAMBAHAN PENTING ---
-        // Jika gagal saat ganti orang, pulihkan ID lama yang sedang berjalan
         if (waitingCallerState == ST_GANTI_PEMAIN) {
           lastUserId = idOrangLama;
         }
-        // ------------------------
         currentState = stateAfterInvalid;
         restoreLCD(stateAfterInvalid);
       }
@@ -1034,7 +1030,9 @@ switch (currentState) {
 
   // --------------------------------------------------------
   // ST_PERIODIC_AUTH — input bebas, validasi ke server
-  // Timeout 30 detik → ST_READY
+  // [REVISI 3] Timer tidak di-reset saat masuk ST_STOP_AUTH,
+  // sehingga countdown tetap berjalan di latar belakang.
+  // Timeout 30 detik → ST_REPAIRING
   // --------------------------------------------------------
   case ST_PERIODIC_AUTH:
     {
@@ -1048,7 +1046,6 @@ switch (currentState) {
         digitalWrite(pinRelayPLC, HIGH);
         digitalWrite(pinAlarm, HIGH);
         showFeedback("VERIF TIMEOUT!", 1000);
-        // [POIN 2] Periodic timeout → mesin mati → kirim EVENT_STOP_RUN
         gantiState(ST_REPAIRING);
         kirimEventkhusus(EVENT_START_LOST, lastUserId);
         break;
@@ -1072,23 +1069,19 @@ switch (currentState) {
 
   // --------------------------------------------------------
   // ST_REPAIRING — lost time
-  // '1' OK → ST_READY, '0' ENG → ST_HALT
+  // '1' OK → ST_READY, '0' ENG → ST_HALT, 'D' → ST_GANTI_PEMAIN
   // --------------------------------------------------------
   case ST_REPAIRING:
     if (key == '1') {
-      // [POIN 4] Lost time OK → kirim EVENT_STOP_LOST, kembali ke ST_READY
       kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
       gantiState(ST_READY);
     } else if (key == '0') {
-      // [POIN 4] Lost time selesai masuk downtime → kirim EVENT_STOP_LOST dulu
       kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
-      // [POIN 5] Jeda 300ms agar event 4 tidak tertumpuk dengan event 5
       delay(300);
-      // Setelah jeda, kirim EVENT_START_DOWN
       kirimEventkhusus(EVENT_START_DOWN, lastUserId);
       butuhTripleAuth = true;
       gantiState(ST_HALT);
-    }else if (key == 'D') {
+    } else if (key == 'D') {
       gantiState(ST_GANTI_PEMAIN);
     }
     break;
@@ -1103,9 +1096,9 @@ switch (currentState) {
       gantiState(ST_TRIPLE_AUTH);
     }
     break;
+
   // --------------------------------------------------------
-  // ST_GANTI_USER_REPAIR — Input keypad untuk ID mekanik/operator baru
-  // A: Submit, B: Backspace, C: Cancel (kembali ke LT)
+  // ST_GANTI_PEMAIN — ganti operator/mekanik saat lost time
   // --------------------------------------------------------
   case ST_GANTI_PEMAIN:
     if (key) {
@@ -1117,14 +1110,11 @@ switch (currentState) {
         lcd.print(auth_input);
       } else if (key == 'A') {
         if (auth_input.length() > 0) {
-          // [PENTING] Simpan ID lama sebelum ditimpa oleh mulaiValidasiServer
           idOrangLama = lastUserId; 
-          
           mulaiValidasiServer(auth_input, ST_GANTI_PEMAIN, ST_GANTI_PEMAIN);
         }
         auth_input = "";
       } else if (key == 'C') {
-        // Batal ganti orang, kembali ke menu Lost Time
         gantiState(ST_REPAIRING); 
       }
     }
@@ -1155,23 +1145,75 @@ switch (currentState) {
     break;
 
   // --------------------------------------------------------
-  // ST_STOP_AUTH — input bebas, validasi ke server
+  // ST_STOP_AUTH — input PIN foreman untuk stop mesin
+  // [REVISI 1] Timeout 30 detik → otomatis kembali ke state sebelum stop
+  // [REVISI 2] Tampilkan sisa waktu di LCD
+  // [REVISI 3] Jika cancel dan sebelumnya PERIODIC_AUTH, pulihkan timerInterval
   // --------------------------------------------------------
   case ST_STOP_AUTH:
+    {
+      // [REVISI 1] Hitung sisa waktu 30 detik
+      long sisaStop = (long)(waktuStopAuth / 1000) - (long)((skrg - stopAuthStartTime) / 1000);
+
+      // [REVISI 2] Tampilkan countdown di LCD baris 0 (posisi kanan)
+      lcd.setCursor(10, 0);
+      if (sisaStop >= 0) {
+        if (sisaStop < 10) lcd.print(" ");
+        lcd.print(String(sisaStop) + "s");
+      }
+
+      // [REVISI 1] Timeout → otomatis kembali ke state sebelum stop
+      if (sisaStop <= 0) {
+        showFeedback("STOP TIMEOUT!   ", 900);
+
+        // [REVISI 3] Pulihkan timerInterval jika dari RUNNING_PRODUCTION atau PERIODIC_AUTH
+        if (savedTimerActive) {
+          currentState = stateSebelumStop;
+          timerInterval = savedTimerInterval;  // lanjutkan timer dari posisi sebelumnya
+          savedTimerActive = false;
+          savedTimerInterval = 0;
+          auth_input = "";
+          lcd.clear();
+          restoreLCD(stateSebelumStop);
+        } else {
+          currentState = stateSebelumStop;
+          auth_input = "";
+          lcd.clear();
+          restoreLCD(stateSebelumStop);
+        }
+        break;
+      }
+    }
     if (key) {
       if (key == 'B') {
         handleBackspace(10, 0);
       } else if (key >= '0' && key <= '9' && auth_input.length() < 8) {
         auth_input += key;
         lcd.setCursor(10, 0);
+        // Geser posisi print PIN agar tidak nabrak countdown
+        // Tampilkan PIN di baris 1 supaya lebih jelas
+        lcd.setCursor(0, 1);
+        lcd.print("PIN: ");
         lcd.print(auth_input);
+        lcd.print("          ");
       } else if (key == 'A') {
         if (auth_input.length() > 0) {
           mulaiValidasiServer(auth_input, ST_STOP_AUTH, ST_STOP_AUTH);
         }
         auth_input = "";
       } else if (key == 'C') {
-        gantiState(stateSebelumStop);
+        // [REVISI 3] Cancel → pulihkan timerInterval jika dari RUNNING_PRODUCTION atau PERIODIC_AUTH
+        if (savedTimerActive) {
+          currentState = stateSebelumStop;
+          timerInterval = savedTimerInterval;  // lanjutkan timer dari posisi sebelumnya
+          savedTimerActive = false;
+          savedTimerInterval = 0;
+          auth_input = "";
+          lcd.clear();
+          restoreLCD(stateSebelumStop);
+        } else {
+          gantiState(stateSebelumStop);
+        }
       }
     }
     break;
