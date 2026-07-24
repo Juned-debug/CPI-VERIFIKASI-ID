@@ -114,11 +114,13 @@
     const wsUrl = 'ws://10.68.1.141:1882/ws/data'; 
 
     function formatTime(totalSeconds) {
-      const h = Math.floor(totalSeconds / 3600);
-      const m = Math.floor((totalSeconds % 3600) / 60);
-      const s = totalSeconds % 60;
-      return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
-    }
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  // Tambahkan Math.floor() di sini agar detiknya dibulatkan
+  const s = Math.floor(totalSeconds % 60); 
+  
+  return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+}
 
     window.triggerProximity = (machineId) => {
       const idx = machines.findIndex(m => m.id === machineId);
@@ -196,14 +198,38 @@
       lucide.createIcons();
     }
 
-    setInterval(() => {
-      machines.forEach(m => {
-        if (m.isRunning) m.runtime_sec++;
-        if (m.isLost) m.lostTime_sec++;
-        if (m.isDown) m.downtime_sec++;
-      });
-      renderMachines();
-    }, 1000);
+    // Pastikan variabel lastTick dideklarasikan di luar setInterval ya
+let lastTick = Date.now();
+
+setInterval(() => {
+  const now = Date.now();
+  // 3. Hitung selisih waktu dalam detik (bisa berupa pecahan desimal)
+  const deltaSec = (now - lastTick) / 1000;
+  // 4. Update lastTick untuk perhitungan berikutnya
+  lastTick = now;
+
+  let needsRender = false;
+  
+  machines.forEach(m => {
+    // Tambahkan kurung kurawal {} agar needsRender hanya true kalau mesin jalan/rusak
+    if (m.isRunning) {
+      m.runtime_sec += deltaSec;
+      needsRender = true;
+    }
+    if (m.isLost) {
+      m.lostTime_sec += deltaSec;
+      needsRender = true;
+    }
+    if (m.isDown) {
+      m.downtime_sec += deltaSec;
+      needsRender = true;
+    }
+  });
+
+  if (needsRender) {
+    renderMachines();
+  }
+}, 1000);
 
     function initWebSocket(url) {
       const socket = new WebSocket(url);
