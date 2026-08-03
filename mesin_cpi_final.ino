@@ -7,7 +7,7 @@
 #include <WiFiManager.h>
 #include <ElegantOTA.h>
 #include <WebServer.h>
-#include "EspUsbHost.h" // [BARU] Library USB Host
+#include "EspUsbHost.h"
 
 // ============================================================
 // KONFIGURASI WiFi & MQTT
@@ -27,23 +27,22 @@ const int ID_MESIN = 1;
 // ============================================================
 // EVENT ID
 // ============================================================
-#define EVENT_START_RUN 1   // tombol START ditekan → mesin akan nyala
-#define EVENT_STOP_RUN 2    // foreman stop → mesin mati
-#define EVENT_START_LOST 3  // tombol emergency → lost time mulai
-#define EVENT_STOP_LOST 4   // '1' OK → lost time selesai
-#define EVENT_START_DOWN 5  // '0' ENG → down time mulai
-#define EVENT_STOP_DOWN 6   // triple auth selesai → down time selesai
-#define EVENT_COUNTER 7     // [BARU] setiap sensor mendeteksi benda
+#define EVENT_START_RUN 1   
+#define EVENT_STOP_RUN 2    
+#define EVENT_START_LOST 3  
+#define EVENT_STOP_LOST 4   
+#define EVENT_START_DOWN 5  
+#define EVENT_STOP_DOWN 6   
+#define EVENT_COUNTER 7     
 
 // ============================================================
 // KONFIGURASI PIN ESP32-S3 N16R8
 // ============================================================
-// CATATAN: Pastikan Pin 19 dan 20 tidak bentrok dengan D- / D+ USB
 const int pinRelayPLC = 11; 
 const int pinAlarm = 10;
 const int pinSensorBenda = 4;
-const int pinBtnForemanStop = 14;
-const int pinBtnEmergency = 12;
+// const int pinBtnForemanStop = 14; // [DIHAPUS] Diganti input keyboard
+const int pinBtnEmergency = 12;      // Sistem Active Low
 const int pinLampiCounter = 7;
 const int pinBtnStart = 13;
 
@@ -83,7 +82,6 @@ unsigned long timerInterval = 0;
 const unsigned long jedaLooping = 300000;
 const unsigned long waktuDualAuth = 60000;
 
-
 // ============================================================
 // DEBOUNCE
 // ============================================================
@@ -112,7 +110,7 @@ String auth_input = "";
 // USB KEYBOARD (Pengganti Keypad 4x4)
 // ============================================================
 EspUsbHost usb;
-volatile char globalUsbKey = 0; // Buffer penyimpan tombol yang ditekan
+volatile char globalUsbKey = 0; 
 
 // ============================================================
 // LCD & MQTT
@@ -171,7 +169,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   serverRole = "";
   if (doc["role"].is<const char*>()) {
     serverRole = String(doc["role"].as<const char*>());
-    // serverRole.toLowerCase();
   }
 
   serverReply = valid ? VAL_VALID : VAL_INVALID;
@@ -406,16 +403,16 @@ void gantiState(State s) {
     lcd.print("GANTI ORANG (LT)");
     lcd.setCursor(0, 1);
     lcd.print("ID: ");
-  // Tambahkan blok ini di dalam fungsi gantiState(State s), misalnya di bawah blok ST_READY
   } else if (s == ST_WAIT_START_DELAY) {
-    digitalWrite(pinRelayPLC, HIGH); // Mesin masih mati menunggu jeda selesai
+    digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, HIGH);
     lcd.setCursor(0, 0);
     lcd.print("MENUNGGU 1 MENIT");
     lcd.setCursor(0, 1);
     lcd.print("SISA:           ");
+  }
 }
-}
+
 // ============================================================
 // SETUP
 // ============================================================
@@ -424,7 +421,7 @@ void setup() {
 
   pinMode(pinRelayPLC, OUTPUT);
   pinMode(pinAlarm, OUTPUT);
-  pinMode(pinBtnForemanStop, INPUT_PULLUP);
+  // pinMode(pinBtnForemanStop, INPUT_PULLUP); // [DIHAPUS]
   pinMode(pinBtnEmergency, INPUT_PULLUP);
   pinMode(pinBtnStart, INPUT_PULLUP);
   pinMode(pinSensorBenda, INPUT_PULLUP);
@@ -468,7 +465,7 @@ void setup() {
   reconnectMQTT();
 
   // Konfigurasi USB Host
-  usb.setKeyboardLayout(ESP_USB_HOST_KEYBOARD_LAYOUT_EN_US); // Ganti layout ke US Standard
+  usb.setKeyboardLayout(ESP_USB_HOST_KEYBOARD_LAYOUT_EN_US);
 
   usb.onDeviceConnected([](const EspUsbHostDeviceInfo &device) {
     Serial.print("USB terhubung: ");
@@ -481,21 +478,23 @@ void setup() {
   });
 
   usb.onKeyboard([](const EspUsbHostKeyboardEvent &event) {
-    if (!event.pressed) return; // Hanya tangkap event tombol ditekan
+    if (!event.pressed) return; 
 
     char mappedKey = 0;
     
-    // PEMETAAN KEYBOARD KE HURUF STATE MACHINE LAMA
+    // PEMETAAN KEYBOARD (DENGAN TAMBAHAN TOMBOL 'S' UNTUK STOP)
     if (event.ascii == '\r' || event.ascii == '\n') {
-      mappedKey = 'A'; // Tombol Enter = 'A' (Submit)
+      mappedKey = 'A'; 
     } else if (event.ascii == 0x08 || event.ascii == 0x7F) {
-      mappedKey = 'B'; // Tombol Backspace = 'B' (Clear)
+      mappedKey = 'B'; 
     } else if (event.ascii == 0x1B) {
-      mappedKey = 'C'; // Tombol Esc = 'C' (Cancel/Halt)
+      mappedKey = 'C'; 
     } else if (event.ascii == 'D' || event.ascii == 'd') {
-      mappedKey = 'D'; // Tetap 'D'
+      mappedKey = 'D'; 
+    } else if (event.ascii == 'S' || event.ascii == 's') { // [BARU] Memicu Stop Auth
+      mappedKey = 'S'; 
     } else if (event.ascii == '*' || (event.ascii >= '0' && event.ascii <= '9')) {
-      mappedKey = event.ascii; // Angka dan Bintang dikirim langsung
+      mappedKey = event.ascii; 
     }
 
     if (mappedKey != 0) {
@@ -510,13 +509,6 @@ void setup() {
   gantiState(ST_IDLE);
 }
 
-// ============================================================
-// LOOP
-// ============================================================
-// void loop() {
-  // ============================================================
-// LOOP
-// ============================================================
 // ============================================================
 // LOOP
 // ============================================================
@@ -536,7 +528,6 @@ void loop() {
   if (skrg - lastTimerUpdate >= 1000) {
     lastTimerUpdate = skrg;
 
-    // Cek apakah sistem sedang berada di rangkaian alur Lost Time atau Down Time
     bool isSesiLT = (currentState == ST_REPAIRING || currentState == ST_GANTI_PEMAIN || 
                     (currentState == ST_WAITING_SERVER && waitingCallerState == ST_GANTI_PEMAIN));
     bool isSesiDT = (currentState == ST_HALT || currentState == ST_TRIPLE_AUTH || 
@@ -544,32 +535,33 @@ void loop() {
 
     if (isSesiLT) {
       totalLostTime++;
-      sesiLostTime++; // Tambah hitungan sesi saat ini
+      sesiLostTime++; 
       
-      // [LOGIKA ALARM LOST TIME]
       if (sesiLostTime <= 15) {
-        digitalWrite(pinAlarm, LOW); // Nyala 15 detik pertama
+        digitalWrite(pinAlarm, LOW); 
       } else if (sesiLostTime > 15 && sesiLostTime <= 300) {
-        digitalWrite(pinAlarm, HIGH); // Mati setelah 15 detik
+        digitalWrite(pinAlarm, HIGH); 
       } else if (sesiLostTime > 300 && sesiLostTime <= 315) {
-        digitalWrite(pinAlarm, LOW); // Nyala lagi selama 15 detik di menit ke-5 (300 detik)
+        digitalWrite(pinAlarm, LOW); 
       } else {
-        digitalWrite(pinAlarm, HIGH); // Mati seterusnya
+        digitalWrite(pinAlarm, HIGH); 
       }
     } 
     else if (isSesiDT) {
       totalDownTime++;
-      sesiDownTime++; // Tambah hitungan sesi saat ini
+      sesiDownTime++; 
       
-      // [LOGIKA ALARM DOWN TIME]
       if (sesiDownTime <= 15) {
-        digitalWrite(pinAlarm, LOW); // Nyala 15 detik pertama
+        digitalWrite(pinAlarm, LOW); 
       } else {
-        digitalWrite(pinAlarm, HIGH); // Mati seterusnya
+        digitalWrite(pinAlarm, HIGH); 
       }
     }
   }
 
+  // ----------------------------------------------------------
+  // INTERRUPT KEYBOARD
+  // ----------------------------------------------------------
   if (key == 'C') {
     if (currentState != ST_PREVENTIVE_MT && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
       gantiState(ST_HALT);
@@ -580,13 +572,24 @@ void loop() {
     }
   }
 
+  // [BARU] LOGIKA FOREMAN STOP DARI KEYBOARD ('S')
+  if (key == 'S') {
+    if (currentState != ST_IDLE && currentState != ST_STOP_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_WAITING_SERVER) {
+      stateSebelumStop = currentState;
+      waktuMulaiStop = millis();
+      gantiState(ST_STOP_AUTH);
+      return;
+    }
+  }
+
   // ----------------------------------------------------------
-  // TOMBOL EMERGENCY
+  // TOMBOL EMERGENCY (System Active Low, ter-trigger bila LOW)
   // ----------------------------------------------------------
   {
     bool btnEmNow = digitalRead(pinBtnEmergency);
     if (btnEmNow != btnEmergencyLastState) btndwnDebounce = skrg;
     if ((skrg - btndwnDebounce) > debounceDelay) {
+      // Tombol divalidasi dan memang memicu state Lost Time jika posisinya LOW
       if (btnEmNow == LOW) {
         if (currentState != ST_PREVENTIVE_MT && currentState != ST_READY && currentState != ST_IDLE && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
           gantiState(ST_REPAIRING);
@@ -597,18 +600,6 @@ void loop() {
       }
     }
     btnEmergencyLastState = btnEmNow;
-  }
-
-  // ----------------------------------------------------------
-  // TOMBOL FOREMAN STOP
-  // ----------------------------------------------------------
-  if (digitalRead(pinBtnForemanStop) == LOW) {
-    if (currentState != ST_IDLE && currentState != ST_STOP_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_WAITING_SERVER) {
-      stateSebelumStop = currentState;
-      waktuMulaiStop = millis();
-      gantiState(ST_STOP_AUTH);
-      return;
-    }
   }
 
   // ----------------------------------------------------------
@@ -883,17 +874,14 @@ void loop() {
 
           if (waitingCallerState == ST_DUAL_AUTH) {
             if (serverRole == "Produksi") {
-              // Jika slot OPR masih kosong, jadikan dia OPR (Orang Pertama)
               if (!oprOk) { 
                 oprOk = true; 
                 showFeedback("OPR: TERVERIF!", 800); 
               } 
-              // Jika OPR sudah terisi, masukkan ke slot SAC (Orang Kedua)
               else if (!sacOk) { 
                 sacOk = true; 
                 showFeedback("SAC: TERVERIF!", 800); 
               } 
-              // Jika keduanya sudah terisi dan ada yang tap lagi
               else {
                 showFeedback("SUDAH INPUT SEMUA", 900);
               }
@@ -906,7 +894,6 @@ void loop() {
           }
 
           if (waitingCallerState == ST_PERIODIC_AUTH) {
-            // Untuk verifikasi ulang, cukup dipastikan dia adalah orang Produksi
             if (serverRole == "Produksi") {
               showFeedback("TERVERIFIKASI!", 800);
               gantiState(ST_RUNNING_PRODUCTION);
@@ -919,8 +906,6 @@ void loop() {
           }
 
           if (waitingCallerState == ST_TRIPLE_AUTH) {
-            
-            // 1. Cek jika yang tap adalah Engineering
             if (serverRole == "eng") {
               if (engOk) {
                 showFeedback("ENG SUDAH INPUT!", 900);
@@ -929,35 +914,26 @@ void loop() {
                 showFeedback("ENG: TERVERIF!", 800); 
               }
             } 
-            // 2. Cek jika yang tap adalah Produksi (SAC / OPR)
             else if (serverRole == "Produksi") {
-              
-              // Kunci Urutan 1: Pastikan Engineering sudah tap duluan
               if (!engOk) {
                 showFeedback("TUNGGU ENG DULU!", 900);
               } 
-              // Kunci Urutan 2: Jika Engineering sudah, tap Produksi pertama jadi SAC
               else if (!sacOk) { 
                 sacOk = true; 
                 showFeedback("SAC: TERVERIF!", 800); 
               } 
-              // Kunci Urutan 3: Jika Engineering & SAC sudah, tap Produksi kedua jadi OPR
               else if (!oprOk) {
                 oprOk = true; 
                 showFeedback("OPR: TERVERIF!", 800); 
               } 
-              // Jika semuanya sudah tap
               else {
                 showFeedback("SUDAH INPUT SEMUA", 900);
               }
-              
             } 
-            // 3. Role lainnya ditolak
             else {
               showFeedback("ROLE TIDAK SESUAI", 900);
             }
 
-            // Eksekusi jika ketiga otorisasi sudah lengkap
             if (sacOk && engOk && oprOk) {
               kirimEventkhusus(EVENT_STOP_DOWN, lastUserId);
               butuhTripleAuth = false;
@@ -1002,9 +978,6 @@ void loop() {
         }
         lcd.setCursor(9, 0);
         lcd.print("C:");
-        // lcd.print(counterBenda % targetBenda == 0 && counterBenda > 0
-        //             ? targetBenda
-        //             : counterBenda % targetBenda);
         int tampilCounter = (counterBenda % targetBenda == 0 && counterBenda > 0) 
                               ? targetBenda 
                               : (counterBenda % targetBenda);
@@ -1136,5 +1109,5 @@ void loop() {
       }
       break;
 
-  } // end switch
+  } 
 }
