@@ -41,7 +41,6 @@ const int ID_MESIN = 1;
 const int pinRelayPLC = 11; 
 const int pinAlarm = 10;
 const int pinSensorBenda = 4;
-// const int pinBtnForemanStop = 14; // [DIHAPUS] Diganti input keyboard
 const int pinBtnEmergency = 12;      // Sistem Active Low
 const int pinLampiCounter = 7;
 const int pinBtnStart = 13;
@@ -264,7 +263,7 @@ void restoreLCD(State s) {
     lcd.setCursor(0, 0);
     lcd.print("STOP? PIN:");
     lcd.setCursor(0, 1);
-    lcd.print("A:ENT C:CANCEL");
+    lcd.print("ENT:OK  -:CANCEL"); 
   } else if (s == ST_READY) {
     lcd.setCursor(0, 0);
     lcd.print("MESIN SIAP");
@@ -274,11 +273,12 @@ void restoreLCD(State s) {
     lcd.setCursor(0, 0);
     lcd.print("GANTI ORANG (LT)");
     lcd.setCursor(0, 1);
-    lcd.print("ID: ");
-  }else if (s == ST_WAIT_START_DELAY) {
+    // 4 char "ID: ", 8 char kosong untuk input, 4 char "-:BK" (Total 16 char)
+    lcd.print("ID:         -:BK"); 
+  } else if (s == ST_WAIT_START_DELAY) {
     lcd.setCursor(0, 0);
     lcd.print("MENUNGGU 1 MENIT");
-    }
+  }
 }
 
 void mulaiValidasiServer(String userId, State callerState, State afterInvalid) {
@@ -309,19 +309,21 @@ void gantiState(State s) {
 
   if (isResume || isMasukMenuStop) {
     // nothing
-  }else {
+  } else {
     timerInterval = millis();
   }
-  if (s == ST_READY || s == ST_RUNNING_PRODUCTION || s == ST_IDLE){
+  
+  if (s == ST_READY || s == ST_RUNNING_PRODUCTION || s == ST_IDLE) {
     sesiLostTime = 0;
     sesiDownTime = 0;
   }
-  if (s == ST_PREVENTIVE_MT){
+  
+  if (s == ST_PREVENTIVE_MT) {
     digitalWrite(pinRelayPLC, HIGH);
     lcd.setCursor(0, 0);
     lcd.print("MODE PREV MAINTE");
-    lcd.setCursor(0,1);
-    lcd.print("           D=STP");
+    lcd.setCursor(0, 1);
+    lcd.print("           +=STP"); 
   } else if (s == ST_IDLE) {
     digitalWrite(pinRelayPLC, LOW);
     digitalWrite(pinAlarm, HIGH);
@@ -377,7 +379,7 @@ void gantiState(State s) {
     lcd.setCursor(0, 0);
     lcd.print("LOST TIME!");
     lcd.setCursor(0, 1);
-    lcd.print("1:OK | 0:DWN");
+    lcd.print("1:FIX -:DWN +:ID"); 
   } else if (s == ST_HALT) {
     digitalWrite(pinRelayPLC, LOW);
     digitalWrite(pinAlarm, LOW);
@@ -385,7 +387,7 @@ void gantiState(State s) {
     lcd.setCursor(0, 0);
     lcd.print("DOWN TIME!");
     lcd.setCursor(0, 1);
-    lcd.print("A: RECOVERY");
+    lcd.print("ENTER: RECOVERY ");
   } else if (s == ST_TRIPLE_AUTH) {
     digitalWrite(pinRelayPLC, LOW);
     digitalWrite(pinAlarm, LOW);
@@ -397,12 +399,12 @@ void gantiState(State s) {
     lcd.setCursor(0, 0);
     lcd.print("STOP? PIN:");
     lcd.setCursor(0, 1);
-    lcd.print("A:ENT C:CANCEL");
+    lcd.print("ENT:OK  -:CANCEL");
   } else if (s == ST_GANTI_PEMAIN) {
     lcd.setCursor(0, 0);
     lcd.print("GANTI ORANG (LT)");
     lcd.setCursor(0, 1);
-    lcd.print("ID: ");
+    lcd.print("ID:         -:BK");
   } else if (s == ST_WAIT_START_DELAY) {
     digitalWrite(pinRelayPLC, HIGH);
     digitalWrite(pinAlarm, HIGH);
@@ -421,7 +423,6 @@ void setup() {
 
   pinMode(pinRelayPLC, OUTPUT);
   pinMode(pinAlarm, OUTPUT);
-  // pinMode(pinBtnForemanStop, INPUT_PULLUP); // [DIHAPUS]
   pinMode(pinBtnEmergency, INPUT_PULLUP);
   pinMode(pinBtnStart, INPUT_PULLUP);
   pinMode(pinSensorBenda, INPUT_PULLUP);
@@ -482,18 +483,25 @@ void setup() {
 
     char mappedKey = 0;
     
-    // PEMETAAN KEYBOARD (DENGAN TAMBAHAN TOMBOL 'S' UNTUK STOP)
+    // ============================================================
+    // PEMETAAN KEYBOARD NUMERIC DIGIGEAR
+    // ============================================================
     if (event.ascii == '\r' || event.ascii == '\n') {
-      mappedKey = 'A'; 
-    } else if (event.ascii == 0x08 || event.ascii == 0x7F) {
-      mappedKey = 'B'; 
-    } else if (event.ascii == 0x1B) {
-      mappedKey = 'C'; 
-    } else if (event.ascii == 'D' || event.ascii == 'd') {
-      mappedKey = 'D'; 
-    } else if (event.ascii == 'S' || event.ascii == 's') { // [BARU] Memicu Stop Auth
-      mappedKey = 'S'; 
-    } else if (event.ascii == '*' || (event.ascii >= '0' && event.ascii <= '9')) {
+      mappedKey = 'A'; // Enter
+    } 
+    else if (event.ascii == 0x08 || event.ascii == 0x7F || event.ascii == '.') {
+      mappedKey = 'B'; // Backspace / Titik
+    } 
+    else if (event.ascii == '-') {
+      mappedKey = 'C'; // Minus (Digunakan untuk Halt DWN & Cancel/Back)
+    } 
+    else if (event.ascii == '+') {
+      mappedKey = 'D'; // Plus (Digunakan untuk Ganti Pemain LT)
+    } 
+    else if (event.ascii == '/') { 
+      mappedKey = 'S'; // Garis Miring (Foreman Stop)
+    } 
+    else if (event.ascii == '*' || (event.ascii >= '0' && event.ascii <= '9')) {
       mappedKey = event.ascii; 
     }
 
@@ -560,19 +568,10 @@ void loop() {
   }
 
   // ----------------------------------------------------------
-  // INTERRUPT KEYBOARD
+  // INTERRUPT KEYBOARD LOKAL & GLOBAL
   // ----------------------------------------------------------
-  if (key == 'C') {
-    if (currentState != ST_PREVENTIVE_MT && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
-      gantiState(ST_HALT);
-      kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
-      delay(300);
-      kirimEventkhusus(EVENT_START_DOWN, lastUserId);
-      return;
-    }
-  }
 
-  // [BARU] LOGIKA FOREMAN STOP DARI KEYBOARD ('S')
+  // LOGIKA FOREMAN STOP DARI KEYBOARD
   if (key == 'S') {
     if (currentState != ST_IDLE && currentState != ST_STOP_AUTH && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_WAITING_SERVER) {
       stateSebelumStop = currentState;
@@ -589,7 +588,6 @@ void loop() {
     bool btnEmNow = digitalRead(pinBtnEmergency);
     if (btnEmNow != btnEmergencyLastState) btndwnDebounce = skrg;
     if ((skrg - btndwnDebounce) > debounceDelay) {
-      // Tombol divalidasi dan memang memicu state Lost Time jika posisinya LOW
       if (btnEmNow == LOW) {
         if (currentState != ST_PREVENTIVE_MT && currentState != ST_READY && currentState != ST_IDLE && currentState != ST_REPAIRING && currentState != ST_HALT && currentState != ST_TRIPLE_AUTH && currentState != ST_STOP_AUTH && currentState != ST_WAITING_SERVER) {
           gantiState(ST_REPAIRING);
@@ -640,16 +638,16 @@ void loop() {
   }
 
   // ----------------------------------------------------------
-  // DISPLAY LCD
+  // DISPLAY LCD LOKAL
   // ----------------------------------------------------------
   if (currentState == ST_REPAIRING) {
     lcd.setCursor(0, 1);
-    lcd.print("1:FIX 0:DWN D:ID");
+    lcd.print("1:FIX -:DWN +:ID"); 
     lcd.setCursor(0, 0);
     lcd.print("SEGERA PERBAIKI!");
   } else if (!stopDownTime && (currentState == ST_HALT || currentState == ST_TRIPLE_AUTH)) {
     lcd.setCursor(0, 1);
-    lcd.print("DT! A:START     ");
+    lcd.print("DT! ENT:START   "); 
     lcd.setCursor(0, 0);
     lcd.print("SEGERA PERBAIKI!");
   }
@@ -1026,11 +1024,12 @@ void loop() {
       }
       break;
 
+    // HANYA DARI STATE INILAH DOWNTIME BISA DIPICU
     case ST_REPAIRING:
       if (key == '1') {
         kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
         gantiState(ST_READY);
-      } else if (key == '0') {
+      } else if (key == '0' || key == 'C') { // Bisa ditekan '0' atau '-'
         kirimEventkhusus(EVENT_STOP_LOST, lastUserId);
         delay(300);
         kirimEventkhusus(EVENT_START_DOWN, lastUserId);
@@ -1064,6 +1063,7 @@ void loop() {
           }
           auth_input = "";
         } else if (key == 'C') {
+          // Fungsi tombol Back (Minus) sudah bisa berjalan normal
           gantiState(ST_REPAIRING); 
         }
       }
